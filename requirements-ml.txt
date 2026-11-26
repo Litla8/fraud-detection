@@ -1,0 +1,9 @@
+# Installed from Step 4 onward. PyTorch (for the autoencoder) is installed separately: the RTX 50-series needs the CUDA 12.8 build.
+imbalanced-learn>=0.12
+xgboost>=2.0
+lightgbm>=4.3
+shap>=0.45
+joblib>=1.3
+fastapi>=0.110
+uvicorn>=0.29
+pydantic>=2.6
