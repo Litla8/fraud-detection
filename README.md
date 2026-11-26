@@ -6,7 +6,7 @@ business cost matrix, and serve the model as a low-latency API. Dataset: Kaggle 
 ## Status
 
 - [x] Step 1: Define the problem and costs (cost matrix, targets, metrics, config)
-- [ ] Step 2: Data exploration
+- [x] Step 2: Data exploration
 - [ ] Step 3: Preprocessing (RobustScaler, time-based split)
 - [ ] Step 4: Handling imbalance (class weights, under-sampling, SMOTE, ADASYN, focal-style weighting)
 - [ ] Step 5: Supervised models (Logistic Regression, Random Forest, XGBoost, LightGBM)
@@ -42,10 +42,21 @@ everything and of blocking everything, and the break-even precision implied by t
 * `fraud/costs.py`: total cost of a set of decisions, the cost of every possible threshold from one sort, and the cheapest threshold.
 * `fraud/data.py`: loading with validation and a profile of the file.
 
+## Step 2: data exploration
+
+```powershell
+python -m fraud.explore     # reports/eda_summary.json, feature_separation.csv, split_drift.csv and 7 charts in reports/figures/
+```
+
+Answers: how rare is fraud, how do amounts and timing differ for fraud and genuine transactions, which single features
+separate fraud best (KS statistic, Cohen's d, single-feature PR-AUC), whether the PCA features are really uncorrelated,
+how many frauds each part of the time-based split gets, and how much the newest transactions drift from the oldest
+(KS distance per feature). `Time` is seconds since the first transaction, so the "hour" charts use the data's own clock.
+
 ## Structure
 
 ```
-fraud/     config.py, data.py, metrics.py, costs.py, define.py (Step 1), logging_utils.py
+fraud/     config.py, data.py, metrics.py, costs.py, define.py (Step 1), splits.py, eda.py, plots.py, explore.py (Step 2), logging_utils.py
 tests/     pytest suite (synthetic data, no Kaggle file needed)
 docs/      project_brief.md
 data/, models/, reports/   generated files (git-ignored)

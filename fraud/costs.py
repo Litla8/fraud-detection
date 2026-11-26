@@ -89,3 +89,16 @@ def savings(model_cost: float, baselines: Dict[str, float]) -> Dict[str, float]:
     """Money saved against the do-nothing baseline, in total and as a share of it."""
     base = baselines["approve_all"]
     return {"saved": round(base - model_cost, 2), "saved_share": round((base - model_cost) / base, 4) if base else 0.0}
+
+
+def break_even_precision(avg_missed_fraud_cost: float, cfg: CostConfig = CostConfig()) -> float:
+    """Precision above which flagging a transaction saves money on average.
+
+    Flagging gains ``avg_missed_fraud_cost - tp_review_cost`` when the transaction is fraud and costs ``fp_cost`` when it
+    is not, so the break-even precision is ``fp_cost / (fp_cost + gain)``. With a cheap false alarm and an expensive
+    missed fraud it is low: the cost-optimal threshold flags generously (compare the stricter targets of the brief).
+    """
+    gain = avg_missed_fraud_cost - cfg.tp_review_cost
+    if gain <= 0:
+        return 1.0
+    return cfg.fp_cost / (cfg.fp_cost + gain)

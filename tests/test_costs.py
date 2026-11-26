@@ -59,3 +59,9 @@ def test_validation_errors() -> None:
         costs.total_cost(Y, np.zeros(6), -AMOUNT, CFG)
     with pytest.raises(ValueError, match="empty"):
         costs.best_threshold(costs.cost_curve(Y, np.zeros(6), AMOUNT, CFG).iloc[0:0])
+
+
+def test_break_even_precision() -> None:
+    cfg = CostConfig(fp_cost=3.0, tp_review_cost=1.0)
+    assert costs.break_even_precision(101.0, cfg) == pytest.approx(3 / 103)
+    assert costs.break_even_precision(0.5, cfg) == 1.0          # a missed fraud cheaper than a review: never worth flagging

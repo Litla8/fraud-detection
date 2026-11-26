@@ -35,7 +35,7 @@ def build_definition(frame: pd.DataFrame, cfg: ProjectConfig) -> Dict[str, Any]:
                                "frauds_caught": 0, "note": "A model that never flags anything looks 99.8% accurate."},
         "cost_matrix": {**asdict(cfg.costs), "currency": "EUR (dataset units)",
                         "average_cost_per_missed_fraud": round(per_fraud, 2),
-                        "break_even_precision": round(per_fraud / (per_fraud + cfg.costs.fp_cost), 4),
+                        "break_even_precision": round(costs.break_even_precision(per_fraud, cfg.costs), 4),
                         "note": "Assumptions to confirm with the business; change them in fraud/config.py."},
         "baselines": {"approve_everything": round(base["approve_all"], 2), "block_everything": round(base["block_all"], 2)},
         "targets": {"pr_auc_above": cfg.targets.pr_auc, "recall_at_least": cfg.targets.recall,
