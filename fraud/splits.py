@@ -5,6 +5,7 @@ from typing import Tuple
 
 import numpy as np
 import pandas as pd
+from sklearn.model_selection import train_test_split
 
 from fraud.config import DataConfig, SplitConfig
 
@@ -36,3 +37,22 @@ def split_by_time(frame: pd.DataFrame, cfg: SplitConfig = SplitConfig(), data: D
     ordered = frame.sort_values(data.time_column, kind="stable").reset_index(drop=True)
     train_end, val_end = time_split_bounds(len(ordered), cfg)
     return ordered.iloc[:train_end].copy(), ordered.iloc[train_end:val_end].copy(), ordered.iloc[val_end:].copy()
+
+
+def split_stratified(frame: pd.DataFrame, cfg: SplitConfig = SplitConfig(), data: DataConfig = DataConfig()
+                     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Random train / validation / test with the same fraud rate in each part (same sizes as the time split).
+
+    Raises:
+        ValueError: If the label column is missing, or a class has too few rows to stratify.
+    """
+    if data.label_column not in frame.columns:
+        raise ValueError(f"Missing column: {data.label_column}")
+    label = frame[data.label_column]
+    counts = label.value_counts()
+    if len(counts) < 2 or counts.min() < 3:
+        raise ValueError("both classes need at least 3 rows to split into three stratified parts")
+    rest, test = train_test_split(frame, test_size=cfg.test_fraction, stratify=label, random_state=cfg.seed)
+    val_share = cfg.val_fraction / (1 - cfg.test_fraction)          # so validation is val_fraction of ALL rows
+    train, val = train_test_split(rest, test_size=val_share, stratify=rest[data.label_column], random_state=cfg.seed)
+    return (train.sort_index().copy(), val.sort_index().copy(), test.sort_index().copy())

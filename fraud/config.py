@@ -39,6 +39,14 @@ class PathsConfig:
     def reports_path(self) -> Path:
         return self.root / self.reports_dir
 
+    def split_path(self, method: str) -> Path:
+        """Folder holding train / validation / test for one split method (``time`` or ``stratified``)."""
+        return self.processed_path / method
+
+    def scaler_path(self, method: str) -> Path:
+        """The fitted scaler for one split method."""
+        return self.models_path / f"scaler_{method}.joblib"
+
     @property
     def problem_report_path(self) -> Path:
         """Where Step 1 writes the problem definition."""
@@ -125,6 +133,22 @@ class SplitConfig:
 
 
 @dataclass(frozen=True)
+class PreprocessConfig:
+    """Step 3 settings: duplicates, scaling and the columns the models will see."""
+
+    drop_duplicates: bool = True            # identical rows (same Time, V1-V28, Amount, Class) would leak between train and test
+    scale_columns: Tuple[str, ...] = ("Amount", "Time")
+    use_time: bool = True                   # keep scaled Time as a feature (Step 5 compares with and without it)
+    hour_features: bool = False             # optional hour_sin / hour_cos from Time (two days only, so off by default)
+    scaled_suffix: str = "_scaled"
+    raw_amount_name: str = "Amount_raw"     # kept next to the features: the cost matrix needs the real amount
+    raw_time_name: str = "Time_raw"
+    id_column: str = "row_id"               # position in the original file, for tracing a row back
+    file_suffix: str = ".pkl"               # pickle: no extra dependency (pyarrow) needed
+    report_name: str = "preprocessing_report.json"
+
+
+@dataclass(frozen=True)
 class ProjectConfig:
     """Everything a pipeline step needs."""
 
@@ -133,3 +157,4 @@ class ProjectConfig:
     costs: CostConfig = field(default_factory=CostConfig)
     targets: TargetConfig = field(default_factory=TargetConfig)
     split: SplitConfig = field(default_factory=SplitConfig)
+    prep: PreprocessConfig = field(default_factory=PreprocessConfig)
