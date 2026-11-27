@@ -179,6 +179,44 @@ class ImbalanceConfig:
 
 
 @dataclass(frozen=True)
+class SupervisedConfig:
+    """Step 5 settings: fixed, sensible hyper-parameters for the four supervised models (no tuning, so nothing peeks at validation).
+
+    ``variants`` are the imbalance treatments tried per model: ``baseline`` (none) and ``smote`` (the Step 4 cross-validation winner,
+    which was a statistical tie with the baseline).
+    """
+
+    models: Tuple[str, ...] = ("logistic_regression", "random_forest", "xgboost", "lightgbm")
+    variants: Tuple[str, ...] = ("baseline", "smote")
+    lr_c: float = 1.0
+    lr_max_iter: int = 1000
+    rf_trees: int = 100
+    rf_max_depth: int = 12
+    rf_min_leaf: int = 5
+    rf_max_samples: float = 0.3             # rows per tree: keeps the forest fast and decorrelated
+    boost_trees: int = 300
+    boost_learning_rate: float = 0.05
+    boost_depth: int = 4                    # XGBoost max_depth
+    boost_leaves: int = 15                  # LightGBM num_leaves
+    boost_subsample: float = 0.8
+    boost_colsample: float = 0.8
+    boost_l2: float = 5.0                   # keeps leaf values finite on 0.2% positives
+    bootstrap_resamples: int = 500          # for the confidence interval of test PR-AUC
+    sample_genuine: int = 40_000            # quick check: genuine training rows kept (all frauds are kept)
+    report_name: str = "model_comparison"
+
+    def __post_init__(self) -> None:
+        """Fail loudly on impossible settings."""
+        known = {"logistic_regression", "random_forest", "xgboost", "lightgbm"}
+        if not set(self.models) <= known or not self.models:
+            raise ValueError(f"models must be a non-empty subset of {sorted(known)}")
+        if not set(self.variants) <= {"baseline", "smote"} or not self.variants:
+            raise ValueError("variants must be a non-empty subset of baseline, smote")
+        if self.bootstrap_resamples < 10:
+            raise ValueError("bootstrap_resamples must be at least 10")
+
+
+@dataclass(frozen=True)
 class ProjectConfig:
     """Everything a pipeline step needs."""
 
@@ -189,3 +227,4 @@ class ProjectConfig:
     split: SplitConfig = field(default_factory=SplitConfig)
     prep: PreprocessConfig = field(default_factory=PreprocessConfig)
     imbalance: ImbalanceConfig = field(default_factory=ImbalanceConfig)
+    supervised: SupervisedConfig = field(default_factory=SupervisedConfig)

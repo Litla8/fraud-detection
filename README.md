@@ -9,7 +9,7 @@ business cost matrix, and serve the model as a low-latency API. Dataset: Kaggle 
 - [x] Step 2: Data exploration
 - [x] Step 3: Preprocessing (duplicates, RobustScaler, time-based and stratified splits)
 - [x] Step 4: Handling imbalance (class weights, under-sampling, SMOTE, ADASYN, focal-style weighting)
-- [ ] Step 5: Supervised models (Logistic Regression, Random Forest, XGBoost, LightGBM)
+- [x] Step 5: Supervised models (Logistic Regression, Random Forest, XGBoost, LightGBM)
 - [ ] Step 6: Anomaly detection (Isolation Forest, One-Class SVM, autoencoder) and the hybrid
 - [ ] Step 7: Feature engineering (not possible on this file: no customer column)
 - [ ] Step 8: Threshold optimisation and risk tiers
@@ -95,10 +95,32 @@ no handling (baseline), balanced class weights, random under-sampling, SMOTE, AD
 * Outputs: `reports/imbalance_comparison.csv` and `.json` (the winner and the ties), `reports/figures/imbalance_cv.png` and `imbalance_pr_curves.png`.
   The test set is not used in this step.
 
+## Step 5: supervised models
+
+```powershell
+python -m fraud.train_supervised --sample     # quick check, about 1-2 minutes
+python -m fraud.train_supervised              # full run: 4 models x 2 variants, 5-fold CV each (10-25 minutes)
+python -m fraud.train_supervised --models logistic_regression xgboost   # only some models
+```
+
+Logistic Regression (baseline), Random Forest, XGBoost and LightGBM, each trained two ways: plain, and with SMOTE (the Step 4
+cross-validation winner, which was statistically tied with doing nothing). Hyper-parameters are fixed and sensible
+(`SupervisedConfig`): no tuning, so nothing is fitted to validation or test.
+
+* **Selection** uses only the mean 5-fold PR-AUC on the training data; models within one standard deviation of the best are reported as a tie.
+* **Metrics** (all in `reports/model_comparison.csv/json`): PR-AUC with a 95% bootstrap interval, recall at precision of at least 0.85,
+  F2 and MCC, and the cost saved against approving everything.
+* **Honest thresholds.** The F2 and cost thresholds come from out-of-fold training scores. "Transferred" recall and precision use a
+  threshold picked on validation and applied to test. "Recall at precision 0.85" picks the threshold on the test scores themselves, so it is the
+  best case and is the number the project target refers to.
+* **The test set has only about 74 frauds.** Read every test score together with its interval: differences smaller than the interval are noise.
+* Outputs: `models/supervised_best.joblib` plus `supervised_best.json` (features and thresholds), and charts in `reports/figures/`
+  (`model_comparison.png`, `model_pr_curves.png`, `feature_importance.png`). If XGBoost or LightGBM is not installed, that model is skipped with a warning.
+
 ## Structure
 
 ```
-fraud/     config.py, data.py, metrics.py, costs.py, define.py (Step 1), splits.py, eda.py, plots.py, explore.py (Step 2), preprocess.py (Step 3), imbalance.py + run_imbalance.py (Step 4), logging_utils.py
+fraud/     config.py, data.py, metrics.py, costs.py, define.py (Step 1), splits.py, eda.py, plots.py, explore.py (Step 2), preprocess.py (Step 3), imbalance.py + run_imbalance.py (Step 4), models.py + train_supervised.py (Step 5), logging_utils.py
 tests/     pytest suite (synthetic data, no Kaggle file needed)
 docs/      project_brief.md
 data/, models/, reports/   generated files (git-ignored)

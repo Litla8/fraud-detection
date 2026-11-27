@@ -185,8 +185,10 @@ def cross_validate_strategy(strategy: Strategy, X: np.ndarray, y: np.ndarray, fo
             "seconds": round(time.perf_counter() - start, 1)}
 
 
-def pick_winner(table: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-    """Highest mean cross-validated PR-AUC, and every strategy within one standard deviation of it (a statistical tie).
+def pick_winner(table: Sequence[Dict[str, Any]], key: str = "strategy") -> Dict[str, Any]:
+    """Highest mean cross-validated PR-AUC, and every row within one standard deviation of it (a statistical tie).
+
+    ``key`` names the column that identifies a row (``strategy`` in Step 4, ``model`` in Step 5).
 
     Raises:
         ValueError: If ``table`` is empty.
@@ -194,6 +196,6 @@ def pick_winner(table: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
     if not table:
         raise ValueError("no strategies to compare")
     best = max(table, key=lambda r: r["cv_pr_auc_mean"])
-    tied = [r["strategy"] for r in table if r["cv_pr_auc_mean"] >= best["cv_pr_auc_mean"] - best["cv_pr_auc_std"] and r is not best]
-    return {"winner": best["strategy"], "tied_with_winner": tied,
+    tied = [r[key] for r in table if r["cv_pr_auc_mean"] >= best["cv_pr_auc_mean"] - best["cv_pr_auc_std"] and r is not best]
+    return {"winner": best[key], "tied_with_winner": tied,
             "note": "Differences smaller than one standard deviation across folds are not reliable." if tied else "Clear winner."}

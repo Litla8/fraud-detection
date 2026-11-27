@@ -174,3 +174,30 @@ def plot_pr_curves(curves: dict, base_rate: float) -> Figure:
     _style(ax)
     fig.tight_layout()
     return fig
+
+
+def plot_model_comparison(table: pd.DataFrame, target: float) -> Figure:
+    """Test PR-AUC with its 95% bootstrap interval for every model and variant, and the target line."""
+    ordered = table.sort_values("test_pr_auc")
+    labels = ordered["model_variant"].str.replace("_", " ").str.replace("/", " / ")
+    fig, ax = plt.subplots(figsize=(8, 0.55 * len(ordered) + 1.6))
+    err = np.vstack([ordered["test_pr_auc"] - ordered["test_pr_auc_ci_low"], ordered["test_pr_auc_ci_high"] - ordered["test_pr_auc"]])
+    ax.barh(labels, ordered["test_pr_auc"], xerr=err, color=GENUINE, capsize=3)
+    ax.axvline(target, color="black", ls="--", lw=1)
+    ax.text(target, len(ordered) - 0.4, f" target {target:.2f}", fontsize=9, va="bottom")
+    ax.set_xlim(0, 1.0); ax.set_xlabel("test PR-AUC (bar) with 95% bootstrap interval (whisker)")
+    ax.set_title("Supervised models on the untouched test set")
+    _style(ax)
+    fig.tight_layout()
+    return fig
+
+
+def plot_importance(importance: dict, top: int = 15, title: str = "Feature importance") -> Figure:
+    """Horizontal bars of the largest feature importances (share of the total)."""
+    items = list(importance.items())[:top][::-1]
+    fig, ax = plt.subplots(figsize=(6.5, 4.8))
+    ax.barh([k for k, _ in items], [v for _, v in items], color=GENUINE)
+    ax.set_xlabel("share of total importance"); ax.set_title(title)
+    _style(ax)
+    fig.tight_layout()
+    return fig

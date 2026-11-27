@@ -80,3 +80,38 @@ def always_genuine_accuracy(y_true: Sequence) -> float:
     if y.size == 0:
         raise ValueError("y_true is empty")
     return float((y == 0).mean())
+
+
+def best_f2_threshold(y_true: Sequence, y_score: Sequence) -> float:
+    """The score threshold that maximises F2 (recall counts double), searched over every distinct threshold."""
+    y, s = _as_arrays(y_true, y_score)
+    precision, recall, thresholds = precision_recall_curve(y, s)
+    p, r = precision[:-1], recall[:-1]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        f2 = np.where(4 * p + r > 0, 5 * p * r / (4 * p + r), 0.0)
+    return float(thresholds[int(np.argmax(f2))])
+
+
+def bootstrap_pr_auc(y_true: Sequence, y_score: Sequence, n_resamples: int = 500, seed: int = 42, confidence: float = 0.95) -> Dict[str, float]:
+    """Confidence interval for PR-AUC from a stratified bootstrap (frauds and genuine rows are resampled separately).
+
+    With only a few dozen frauds in a test set, the interval is wide: it shows how much of a score is luck.
+    """
+    y, s = _as_arrays(y_true, y_score)
+    if n_resamples < 10 or not 0 < confidence < 1:
+        raise ValueError("need n_resamples >= 10 and confidence in (0, 1)")
+    rng = np.random.default_rng(seed)
+    fraud, genuine = np.flatnonzero(y == 1), np.flatnonzero(y == 0)
+    values = np.empty(n_resamples)
+    for i in range(n_resamples):
+        idx = np.concatenate([rng.choice(fraud, len(fraud)), rng.choice(genuine, len(genuine))])
+        values[i] = average_precision_score(y[idx], s[idx])
+    tail = (1 - confidence) / 2
+    low, high = np.quantile(values, [tail, 1 - tail])
+    return {"low": float(low), "high": float(high), "std": float(values.std(ddof=1))}
+
+
+def apply_threshold(y_true: Sequence, y_score: Sequence, threshold: float) -> Dict[str, Any]:
+    """Precision, recall, F2 and MCC when ``y_score >= threshold`` is flagged (a threshold chosen elsewhere, so the numbers are honest)."""
+    y, s = _as_arrays(y_true, y_score)
+    return {"threshold": float(threshold), **threshold_metrics(y, (s >= threshold).astype(int))}
