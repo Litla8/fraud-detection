@@ -142,3 +142,35 @@ def plot_correlation(frame: pd.DataFrame, features: Sequence[str], cfg: DataConf
     ax.set_title("Correlation of the top features with each other and with Class")
     fig.tight_layout()
     return fig
+
+
+def plot_strategy_cv(table: pd.DataFrame, winner: str) -> Figure:
+    """Cross-validated PR-AUC (mean with one standard deviation) for every imbalance strategy; the winner is dark."""
+    ordered = table.sort_values("cv_pr_auc_mean")
+    fig, ax = plt.subplots(figsize=(8, 4))
+    colours = [FRAUD if name == winner else GENUINE for name in ordered["strategy"]]
+    ax.barh(ordered["strategy"], ordered["cv_pr_auc_mean"], xerr=ordered["cv_pr_auc_std"], color=colours, capsize=4)
+    ax.set_xlabel("PR-AUC across cross-validation folds (bar: mean, whisker: one standard deviation)")
+    ax.set_title("Imbalance strategies compared (training data, folds)")
+    for y, (value, std) in enumerate(zip(ordered["cv_pr_auc_mean"], ordered["cv_pr_auc_std"])):
+        ax.text(value + std + 0.005, y, f"{value:.3f}", va="center", fontsize=9)
+    ax.set_xlim(0, min(1.05, float(ordered["cv_pr_auc_mean"].max() + ordered["cv_pr_auc_std"].max()) + 0.12))
+    _style(ax)
+    fig.tight_layout()
+    return fig
+
+
+def plot_pr_curves(curves: dict, base_rate: float) -> Figure:
+    """Precision-recall curves on validation data, one line per strategy (``curves`` maps name -> (precision, recall))."""
+    fig, ax = plt.subplots(figsize=(7, 5))
+    for name, (precision, recall) in curves.items():
+        ax.plot(recall, precision, label=name, lw=1.6)
+    ax.axhline(base_rate, color="black", ls=":", lw=1, label="no skill")
+    ax.axhline(0.85, color="grey", ls="--", lw=1)
+    ax.text(0.01, 0.86, "precision 0.85", fontsize=8, color="grey")
+    ax.set_xlabel("recall"); ax.set_ylabel("precision"); ax.set_ylim(0, 1.02)
+    ax.set_title("Precision-recall on validation data")
+    ax.legend(frameon=False, fontsize=8)
+    _style(ax)
+    fig.tight_layout()
+    return fig

@@ -149,6 +149,36 @@ class PreprocessConfig:
 
 
 @dataclass(frozen=True)
+class ImbalanceConfig:
+    """Step 4 settings: the probe model and the imbalance strategies compared on it.
+
+    The probe is scikit-learn's histogram gradient boosting. ``l2_regularization`` is not optional here: without it, the
+    unweighted model's leaf values blow up on 0.2% positives and its ranking collapses (PR-AUC near 0.01 in our tests).
+    """
+
+    sampling_ratio: float = 0.10            # minority / majority after resampling (0.10 = one fraud per ten genuine)
+    k_neighbors: int = 5                    # SMOTE / ADASYN neighbours
+    focal_gamma: float = 2.0                # focusing strength: weight = floor + (1 - p_true) ** gamma
+    focal_floor: float = 0.01               # easy examples keep at least this weight
+    focal_inner_folds: int = 3              # out-of-fold passes used to measure how hard each training row is
+    max_iter: int = 150
+    learning_rate: float = 0.1
+    max_leaf_nodes: int = 15
+    l2_regularization: float = 10.0
+    sample_genuine: int = 40_000            # quick check: genuine rows kept (all frauds are kept)
+    report_name: str = "imbalance_comparison"
+
+    def __post_init__(self) -> None:
+        """Fail loudly on impossible settings."""
+        if not 0 < self.sampling_ratio <= 1:
+            raise ValueError("sampling_ratio must be in (0, 1]")
+        if self.k_neighbors < 1 or self.focal_inner_folds < 2 or self.max_iter < 1:
+            raise ValueError("k_neighbors, focal_inner_folds and max_iter must be positive (folds at least 2)")
+        if self.focal_gamma < 0 or not 0 <= self.focal_floor <= 1:
+            raise ValueError("focal_gamma must be >= 0 and focal_floor in [0, 1]")
+
+
+@dataclass(frozen=True)
 class ProjectConfig:
     """Everything a pipeline step needs."""
 
@@ -158,3 +188,4 @@ class ProjectConfig:
     targets: TargetConfig = field(default_factory=TargetConfig)
     split: SplitConfig = field(default_factory=SplitConfig)
     prep: PreprocessConfig = field(default_factory=PreprocessConfig)
+    imbalance: ImbalanceConfig = field(default_factory=ImbalanceConfig)

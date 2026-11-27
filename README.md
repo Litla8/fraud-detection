@@ -8,7 +8,7 @@ business cost matrix, and serve the model as a low-latency API. Dataset: Kaggle 
 - [x] Step 1: Define the problem and costs (cost matrix, targets, metrics, config)
 - [x] Step 2: Data exploration
 - [x] Step 3: Preprocessing (duplicates, RobustScaler, time-based and stratified splits)
-- [ ] Step 4: Handling imbalance (class weights, under-sampling, SMOTE, ADASYN, focal-style weighting)
+- [x] Step 4: Handling imbalance (class weights, under-sampling, SMOTE, ADASYN, focal-style weighting)
 - [ ] Step 5: Supervised models (Logistic Regression, Random Forest, XGBoost, LightGBM)
 - [ ] Step 6: Anomaly detection (Isolation Forest, One-Class SVM, autoencoder) and the hybrid
 - [ ] Step 7: Feature engineering (not possible on this file: no customer column)
@@ -74,10 +74,31 @@ and `row_id` (position in the original file). Scalers go to `models/scaler_<spli
 `reports/preprocessing_report.json` records the duplicates, the size and fraud count of every part, the checks and the scaler values.
 Later steps read the data with `fraud.preprocess.load_split(cfg, "time")`.
 
+## Step 4: handling imbalance
+
+```powershell
+python -m fraud.run_imbalance --sample   # quick check, about 1 minute
+python -m fraud.run_imbalance            # full comparison, about 5-8 minutes
+python -m fraud.run_imbalance --split stratified   # the same on the random split
+```
+
+Six strategies, each used to train the same probe model (scikit-learn histogram gradient boosting, L2-regularised, fixed 150 iterations):
+no handling (baseline), balanced class weights, random under-sampling, SMOTE, ADASYN and focal-style weighting.
+
+* **Resampling only inside folds.** Each strategy is applied to the training rows of every cross-validation fold; validation and test
+  rows are never resampled, so scores reflect the real 0.17% fraud rate. SMOTE, ADASYN and under-sampling are written in
+  numpy / scikit-learn in `fraud/imbalance.py` (fully unit-tested) rather than taken from imbalanced-learn.
+* **Focal-style weighting** approximates focal loss with sample weights: a row's weight is `floor + (1 - p_true) ** gamma`, where `p_true`
+  comes from out-of-fold predictions, then the weights are normalised to mean 1. It is not a custom loss function.
+* **Selection** uses the mean 5-fold PR-AUC on the training data. Strategies within one standard deviation of the best are reported as a
+  tie. The probability threshold behind the cost columns is chosen from out-of-fold scores, never from validation.
+* Outputs: `reports/imbalance_comparison.csv` and `.json` (the winner and the ties), `reports/figures/imbalance_cv.png` and `imbalance_pr_curves.png`.
+  The test set is not used in this step.
+
 ## Structure
 
 ```
-fraud/     config.py, data.py, metrics.py, costs.py, define.py (Step 1), splits.py, eda.py, plots.py, explore.py (Step 2), preprocess.py (Step 3), logging_utils.py
+fraud/     config.py, data.py, metrics.py, costs.py, define.py (Step 1), splits.py, eda.py, plots.py, explore.py (Step 2), preprocess.py (Step 3), imbalance.py + run_imbalance.py (Step 4), logging_utils.py
 tests/     pytest suite (synthetic data, no Kaggle file needed)
 docs/      project_brief.md
 data/, models/, reports/   generated files (git-ignored)
