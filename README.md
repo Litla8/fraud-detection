@@ -11,9 +11,9 @@ business cost matrix, and serve the model as a low-latency API. Dataset: Kaggle 
 - [x] Step 4: Handling imbalance (class weights, under-sampling, SMOTE, ADASYN, focal-style weighting)
 - [x] Step 5: Supervised models (Logistic Regression, Random Forest, XGBoost, LightGBM)
 - [x] Step 6: Anomaly detection (Isolation Forest, One-Class SVM, autoencoder) and the hybrid
-- [ ] Step 7: Feature engineering (not possible on this file: no customer column)
+- [x] Step 7: Feature engineering: skipped on purpose (no customer or merchant column in this file, so nothing to aggregate per customer)
 - [x] Step 8: Threshold optimisation and risk tiers
-- [ ] Step 9: SHAP, FastAPI, Docker, drift monitoring
+- [x] Step 9: SHAP, FastAPI, Docker, drift monitoring
 
 ## Targets
 
@@ -103,8 +103,8 @@ python -m fraud.train_supervised              # full run: 4 models x 2 variants,
 python -m fraud.train_supervised --models logistic_regression xgboost   # only some models
 ```
 
-Logistic Regression (baseline), Random Forest, XGBoost and LightGBM, each trained two ways: plain, and with SMOTE (the Step 4
-cross-validation winner, which was statistically tied with doing nothing). Hyper-parameters are fixed and sensible
+Logistic Regression (baseline), Random Forest, XGBoost and LightGBM, each trained two ways: plain, and with SMOTE (statistically tied
+with doing nothing in the Step 4 comparison, so both are tried). Hyper-parameters are fixed and sensible
 (`SupervisedConfig`): no tuning, so nothing is fitted to validation or test.
 
 * **Selection** uses only the mean 5-fold PR-AUC on the training data; models within one standard deviation of the best are reported as a tie.
@@ -150,7 +150,8 @@ validation scores and applied unchanged to the test set.**
   picks the threshold on the test set itself (not achievable in practice).
 * **Three risk tiers** (`fraud/policy.py`): score below `t_medium` is approved (low), from `t_medium` to `t_high` gets an OTP check (medium),
   from `t_high` is blocked and reviewed (high). The best pair is found exactly by trying every pair of candidate cut points.
-  An OTP stops 90% of fraud (assumption) and costs EUR 0.25 for every medium row.
+  An OTP stops 90% of fraud (assumption) and costs EUR 0.25 for every medium row. The medium tier is capped at 1% of all transactions
+  (`max_medium_share`, the step-up capacity): without the cap the cheapest tiers on this data send 5-6% of customers to an OTP check for about one extra fraud stopped.
 * **Cost-benefit** (`reports/cost_benefit.csv`, `cost_benefit.md`): cost and saving against "approve everything" for every strategy, a 95%
   bootstrap interval for the tiered saving, the saving per 1,000,000 transactions, and `sensitivity.csv`, which re-chooses the thresholds under
   false-alarm costs of EUR 1 / 3 / 10 and fixed missed-fraud fees of EUR 0 / 15 / 50 and scores them on the test set.
@@ -159,11 +160,61 @@ validation scores and applied unchanged to the test set.**
 * The cost-optimal block threshold flags generously (break-even precision is about 2%), so it differs from the brief's precision-0.85 target;
   both are reported.
 
+## Step 9: explanations, API, Docker and drift monitoring
+
+```powershell
+python -m fraud.explain             # SHAP importance + example explanations   -> reports/shap_importance.csv, explanations.json, 2 charts
+python -m fraud.drift               # drift reference from training data + drift check -> models/drift_reference.json, reports/drift_report.*
+python -m fraud.benchmark           # latency against the 100 ms budget         -> reports/latency_report.json (exit code 1 if over budget)
+uvicorn fraud.api:create_default_app --factory --port 8000      # run the service locally, docs at http://localhost:8000/docs
+python -m fraud.smoke_test          # send real test transactions to the running service
+```
+
+* **Explanations** (`fraud/explain.py`): LightGBM and XGBoost give exact TreeSHAP values natively (`pred_contrib`), identical to
+  `shap.TreeExplainer` for those models and without the shap package in the image; `--method shap` cross-checks with the package. Forests use shap.
+  Features are anonymised PCA components, so "V14 raised the risk" is statistically valid but not a business reason a customer could read.
+* **Service** (`fraud/scoring.py`, `fraud/api.py`): `POST /score` (one transaction), `POST /score/batch` (up to 1,000), `GET /health`, `GET /policy`, `GET /drift`;
+  add `?explain=true` for the top reasons. Every response carries the score, the **tier** (`low` approve, `medium` OTP check, `high` block and review), the action,
+  and `latency_ms`; the `X-Process-Time-ms` header gives the server time. Inputs are validated (all 30 fields required, finite, amount >= 0, no extra fields).
+  Thresholds come from `models/decision_policy.json` (Step 8); the scaler is the Step 3 one, so raw `Time` and `Amount` go in as in the Kaggle file.
+* **Latency**: the scoring core runs single-threaded per request (a thread pool costs more than it saves for one row). `fraud.benchmark` reports p50 / p95 / p99
+  for scoring, scoring with reasons, and (when FastAPI and httpx are installed) the HTTP round trip, against the 100 ms budget.
+* **Drift** (`fraud/drift.py`): population stability index per input and for the model score, against training data (scores against validation).
+  Below 0.10 stable, 0.10 to 0.25 watch, above 0.25 alert; overall `alert` when the score or a quarter of the features alert. The API keeps the latest 5,000
+  scored transactions and `GET /drift` reports once 500 have arrived. `Time_scaled` is excluded: a clock only moves forward, so it always looks "drifted".
+  `fraud.drift` also checks validation and four slices of the test period so you can see drift grow over time.
+* **Docker**: the image holds the `fraud/` package and the `models/` files, nothing else.
+
+```powershell
+python -m fraud.pin_requirements                       # writes requirements-api.txt pinned to YOUR installed versions (a saved model must load with the same scikit-learn / lightgbm)
+docker build -t fraud-api --build-arg PYTHON_VERSION=3.14 .       # use the version pin_requirements prints
+docker run --rm -p 8000:8000 fraud-api
+python -m fraud.smoke_test --url http://localhost:8000
+```
+
+Example request (`Time`, `V1`-`V28`, `Amount` as in the Kaggle file):
+
+```powershell
+curl.exe -X POST "http://localhost:8000/score?explain=true" -H "Content-Type: application/json" -d "@sample.json"
+```
+
+Collect everything into one readable document at any point (sections for steps you have not run say which command creates them):
+
+```powershell
+python -m fraud.report      # -> reports/RESULTS.md: scorecard against the targets, every step's key numbers, limitations
+```
+
+Known limitations: `Time_scaled` is a model input, but time since the first transaction grows without bound in production, so a deployed model would see values far
+outside its training range (trees treat them as "latest period"). With LightGBM it is the single most influential feature by SHAP (13% in our run), so a production
+version should retrain without it: set `use_time=False` in `PreprocessConfig`, rerun Steps 3, 5, 8 and 9, and compare PR-AUC (see the results section).
+The service has no authentication, rate limiting or persistent logging: it is a demonstration of the scoring path.
+
 ## Structure
 
 ```
-fraud/     config.py, data.py, metrics.py, costs.py, define.py (Step 1), splits.py, eda.py, plots.py, explore.py (Step 2), preprocess.py (Step 3), imbalance.py + run_imbalance.py (Step 4), models.py + train_supervised.py (Step 5), anomaly.py + train_anomaly.py (Step 6), policy.py + optimize_threshold.py (Step 8), logging_utils.py
+fraud/     config.py, data.py, metrics.py, costs.py, define.py (Step 1), splits.py, eda.py, plots.py, explore.py (Step 2), preprocess.py (Step 3), imbalance.py + run_imbalance.py (Step 4), models.py + train_supervised.py (Step 5), anomaly.py + train_anomaly.py (Step 6), policy.py + optimize_threshold.py (Step 8), report.py, explain.py, schemas.py, scoring.py, api.py, drift.py, benchmark.py, smoke_test.py, pin_requirements.py (Step 9), logging_utils.py
 tests/     pytest suite (synthetic data, no Kaggle file needed)
 docs/      project_brief.md
+Dockerfile, .dockerignore, requirements-api.txt (generated)
 data/, models/, reports/   generated files (git-ignored)
 ```

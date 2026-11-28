@@ -43,6 +43,8 @@ def markdown_report(summary: Dict[str, Any], cfg: ProjectConfig) -> str:
              f"- Caught fraud (review): EUR {c.tp_review_cost:g}", f"- OTP check: EUR {c.otp_cost:g}, stops {c.otp_fraud_catch_rate:.0%} of fraud", "",
              "## Strategies on the test set", "", markdown_table(table), "",
              "## Risk tiers on the test set", "", markdown_table(tiers), "",
+             "## How much depends on the OTP assumptions", "", markdown_table(pd.DataFrame(summary["otp_sensitivity"])[
+                 ["otp_catch_rate", "otp_cost", "otp_share_of_traffic", "tiers_saved_share", "block_saved_share", "tiers_beat_block"]]), "",
              "## Result", "",
              f"The recommended tiered policy saves EUR {rec['saved']:,.2f} of EUR {rec['approve_all_cost']:,.2f} ({rec['saved_share']:.1%}; 95% interval "
              f"{summary['saved_share_interval']['low']:.1%} to {summary['saved_share_interval']['high']:.1%}), about EUR {rec['saved_per_million']:,.0f} "
@@ -77,7 +79,7 @@ def run(cfg: ProjectConfig, method: Optional[str] = None) -> Dict[str, Any]:
     p85_t = metrics.recall_at_precision(yv, sv, cfg.targets.precision_floor)["threshold"]
     # 2. risk tiers, picked on validation
     candidates = policy.candidate_thresholds(sv, tcfg.tier_candidates, tcfg.min_flag_share, tcfg.max_flag_share)
-    tiers = policy.optimise_tiers(yv, sv, av, ccfg, candidates)
+    tiers = policy.optimise_tiers(yv, sv, av, ccfg, candidates, tcfg.max_medium_share)
     LOGGER.info("validation: block threshold %.4f (bootstrap median %.4f, IQR %.4f-%.4f); tiers OTP>=%.4f block>=%.4f", point, robust,
                 stability["q25"], stability["q75"], tiers["t_medium"], tiers["t_high"])
     # 3. everything below is the test set, with those fixed thresholds
@@ -97,16 +99,21 @@ def run(cfg: ProjectConfig, method: Optional[str] = None) -> Dict[str, Any]:
     recommended = next(r for r in strategies if r["strategy"] == "three tiers (OTP + block)")
     interval = policy.saved_share_interval(ys, ss, as_, tiers["t_medium"], tiers["t_high"], ccfg, tcfg.savings_resamples)
     sens = policy.sensitivity(yv, sv, av, ys, ss, as_, ccfg, tcfg)
+    otp_sens = policy.otp_sensitivity(yv, sv, av, ys, ss, as_, ccfg, tcfg)
     val_tiers = policy.tier_table(yv, sv, tiers["t_medium"], tiers["t_high"])
     test_tiers = policy.tier_table(ys, ss, tiers["t_medium"], tiers["t_high"])
     for row in strategies:
         LOGGER.info("%-52s cost %9.2f | saved %8.2f (%5.1f%%) | blocked %5d | OTP %5d | frauds stopped %d/%d", row["strategy"], row["cost"], row["saved"],
                     100 * row["saved_share"], row["blocked"], row["otp_checks"], row["frauds_stopped"], row["frauds"])
+    weak = otp_sens[(otp_sens["otp_catch_rate"] == otp_sens["otp_catch_rate"].min()) & (otp_sens["otp_cost"] == otp_sens["otp_cost"].max())].iloc[0]
+    LOGGER.info("with the weakest OTP assumptions (catch %.0f%%, cost %.2f) the tiers save %.1f%% vs %.1f%% for block-only", 100 * weak["otp_catch_rate"],
+                weak["otp_cost"], 100 * weak["tiers_saved_share"], 100 * weak["block_saved_share"])
     LOGGER.info("tiered policy saves %.1f%% (95%% interval %.1f%% to %.1f%%)", 100 * recommended["saved_share"], 100 * interval["low"], 100 * interval["high"])
     reports, figures = cfg.paths.reports_path, cfg.paths.reports_path / "figures"
     reports.mkdir(parents=True, exist_ok=True)
     table.to_csv(reports / "cost_benefit.csv", index=False)
     sens.to_csv(reports / "sensitivity.csv", index=False)
+    otp_sens.to_csv(reports / "otp_sensitivity.csv", index=False)
     val_curve, test_curve = costs.cost_curve(yv, sv, av, ccfg), costs.cost_curve(ys, ss, as_, ccfg)
     chosen = {"validation": costs.best_threshold(val_curve), "test": {"flagged": int((ss >= point).sum()), "cost": next(r for r in strategies if r["strategy"].endswith("(point)"))["cost"]}}
     plots.save_figure(plots.plot_cost_curves({"validation": val_curve, "test": test_curve}, chosen, {"validation": len(yv), "test": len(ys)}), figures / "cost_curves.png")
@@ -117,7 +124,7 @@ def run(cfg: ProjectConfig, method: Optional[str] = None) -> Dict[str, Any]:
                "thresholds": {"block_point": point, "block_bootstrap_median": robust, "bootstrap_spread": stability, "f2": f2_t, "precision_0.85": p85_t,
                               "tier_medium_otp": tiers["t_medium"], "tier_high_block": tiers["t_high"], "test_optimal_best_case": oracle},
                "recommended": recommended, "saved_share_interval": interval, "validation_tiers": val_tiers.to_dict("records"),
-               "test_tiers": test_tiers.to_dict("records"), "strategies": strategies, "sensitivity": sens.to_dict("records"),
+               "test_tiers": test_tiers.to_dict("records"), "strategies": strategies, "sensitivity": sens.to_dict("records"), "otp_sensitivity": otp_sens.to_dict("records"),
                "costs": {"fn_fixed": ccfg.fn_fixed, "fp_cost": ccfg.fp_cost, "tp_review_cost": ccfg.tp_review_cost, "otp_cost": ccfg.otp_cost,
                          "otp_fraud_catch_rate": ccfg.otp_fraud_catch_rate}}
     (reports / f"{tcfg.report_name}.json").write_text(json.dumps(summary, indent=2, default=float), encoding="utf-8")

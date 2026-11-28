@@ -20,7 +20,10 @@ def _cfg(tmp_path: Path, **prep) -> ProjectConfig:
 
 
 def test_feature_names() -> None:
-    assert preprocess.feature_names()[-2:] == ["Amount_scaled", "Time_scaled"] and len(preprocess.feature_names()) == 30
+    with_time = PreprocessConfig(use_time=True)                       # explicit: the project default may be use_time=False
+    assert preprocess.feature_names(prep=with_time)[-2:] == ["Amount_scaled", "Time_scaled"] and len(preprocess.feature_names(prep=with_time)) == 30
+    without_time = preprocess.feature_names(prep=PreprocessConfig(use_time=False))
+    assert without_time[-1] == "Amount_scaled" and len(without_time) == 29 and "Time_scaled" not in without_time
     cfg = PreprocessConfig(use_time=False, hour_features=True)
     assert preprocess.feature_names(prep=cfg)[-3:] == ["Amount_scaled", "hour_sin", "hour_cos"]
 

@@ -69,11 +69,15 @@ def candidate_thresholds(score: Sequence, n: int, min_share: float, max_share: f
     return np.r_[cuts, np.inf]
 
 
-def optimise_tiers(y_true: Sequence, score: Sequence, amount: Sequence, cfg: CostConfig, candidates: Sequence[float]) -> Dict[str, Any]:
+def optimise_tiers(y_true: Sequence, score: Sequence, amount: Sequence, cfg: CostConfig, candidates: Sequence[float],
+                   max_medium_share: float = 1.0) -> Dict[str, Any]:
     """The cheapest pair ``t_medium <= t_high`` among ``candidates`` (every pair is tried, using cumulative sums, so it is exact).
 
-    Ties go to the pair with the highest thresholds (fewest interventions).
+    ``max_medium_share`` caps the share of all transactions that may get an OTP check (the step-up capacity of the business); pairs
+    with no medium tier are always allowed, so a solution always exists. Ties go to the pair with the highest thresholds.
     """
+    if not 0 < max_medium_share <= 1:
+        raise ValueError("max_medium_share must be in (0, 1]")
     y, s, a = _prepare(y_true, score, amount)
     c = np.unique(np.asarray(candidates, dtype=float))
     if c.size < 2 or (y == 1).sum() == 0 or (y == 0).sum() == 0:
@@ -89,7 +93,9 @@ def optimise_tiers(y_true: Sequence, score: Sequence, amount: Sequence, cfg: Cos
              + (1 - cfg.otp_fraud_catch_rate) * (cum_miss[fi][None, :] - cum_miss[fi][:, None])        # medium frauds that pass the OTP
              + cfg.otp_cost * ((fi[None, :] - fi[:, None]) + (gi[None, :] - gi[:, None]))              # every medium row is checked
              + cfg.tp_review_cost * (nf - fi)[None, :] + cfg.fp_cost * (ng - gi)[None, :])             # high tier
-    total = np.where(np.triu(np.ones_like(total, dtype=bool)), total, np.inf)                          # medium cut <= high cut
+    medium_rows = (fi[None, :] - fi[:, None]) + (gi[None, :] - gi[:, None])
+    allowed = np.triu(np.ones_like(total, dtype=bool)) & (medium_rows <= max_medium_share * (nf + ng))
+    total = np.where(allowed, total, np.inf)                                                           # medium cut <= high cut, OTP volume capped
     best = total.min()
     rows, cols = np.nonzero(total == best)
     pick = np.lexsort((cols, rows))[-1]                                                                # highest thresholds among ties
@@ -181,10 +187,33 @@ def sensitivity(y_val: np.ndarray, s_val: np.ndarray, a_val: np.ndarray, y_test:
         for fn in tcfg.sensitivity_fn_fixed:
             alt = replace(cfg, fp_cost=fp, fn_fixed=fn)
             t = best_binary_threshold(y_val, s_val, a_val, alt)
-            tiers = optimise_tiers(y_val, s_val, a_val, alt, candidates)
+            tiers = optimise_tiers(y_val, s_val, a_val, alt, candidates, tcfg.max_medium_share)
             block = strategy_row("block", y_test, s_test, a_test, t, t, alt, tcfg.per_transactions)
             tiered = strategy_row("tiers", y_test, s_test, a_test, tiers["t_medium"], tiers["t_high"], alt, tcfg.per_transactions)
             rows.append({"fp_cost": fp, "fn_fixed": fn, "block_threshold": t, "block_saved_share": block["saved_share"],
                          "t_medium": tiers["t_medium"], "t_high": tiers["t_high"], "tiers_saved_share": tiered["saved_share"],
                          "tiers_saved_per_million": tiered["saved_per_million"]})
+    return pd.DataFrame(rows)
+
+
+def otp_sensitivity(y_val: np.ndarray, s_val: np.ndarray, a_val: np.ndarray, y_test: np.ndarray, s_test: np.ndarray, a_test: np.ndarray,
+                    cfg: CostConfig, tcfg: ThresholdConfig) -> pd.DataFrame:
+    """How much of the tiered saving survives weaker or costlier OTP checks (the OTP numbers are assumptions, not data).
+
+    Tiers are re-chosen on validation for every (catch rate, cost) pair and scored on test; ``block_saved_share`` is the best block-only rule
+    under the same costs, so ``tiers_beat_block`` says whether the medium tier is still worth having.
+    """
+    rows: List[Dict[str, Any]] = []
+    candidates = candidate_thresholds(s_val, tcfg.tier_candidates, tcfg.min_flag_share, tcfg.max_flag_share)
+    t = best_binary_threshold(y_val, s_val, a_val, cfg)
+    block = strategy_row("block", y_test, s_test, a_test, t, t, cfg, tcfg.per_transactions)
+    for catch in tcfg.sensitivity_otp_catch:
+        for otp in tcfg.sensitivity_otp_cost:
+            alt = replace(cfg, otp_fraud_catch_rate=catch, otp_cost=otp)
+            tiers = optimise_tiers(y_val, s_val, a_val, alt, candidates, tcfg.max_medium_share)
+            row = strategy_row("tiers", y_test, s_test, a_test, tiers["t_medium"], tiers["t_high"], alt, tcfg.per_transactions)
+            rows.append({"otp_catch_rate": catch, "otp_cost": otp, "t_medium": tiers["t_medium"], "t_high": tiers["t_high"],
+                         "otp_checks": row["otp_checks"], "otp_share_of_traffic": round(row["otp_checks"] / len(y_test), 5),
+                         "tiers_saved_share": row["saved_share"], "block_saved_share": block["saved_share"],
+                         "tiers_beat_block": bool(row["saved_share"] > block["saved_share"])})
     return pd.DataFrame(rows)

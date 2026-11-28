@@ -138,7 +138,7 @@ class PreprocessConfig:
 
     drop_duplicates: bool = True            # identical rows (same Time, V1-V28, Amount, Class) would leak between train and test
     scale_columns: Tuple[str, ...] = ("Amount", "Time")
-    use_time: bool = True                   # keep scaled Time as a feature (Step 5 compares with and without it)
+    use_time: bool = False                  # off: Time is a clock that only grows, and with it on it was LightGBM's top feature (see README, Step 9)
     hour_features: bool = False             # optional hour_sin / hour_cos from Time (two days only, so off by default)
     scaled_suffix: str = "_scaled"
     raw_amount_name: str = "Amount_raw"     # kept next to the features: the cost matrix needs the real amount
@@ -274,6 +274,9 @@ class ThresholdConfig:
     max_flag_share: float = 0.5             # ... and the top 50% of validation scores
     sensitivity_fp_costs: Tuple[float, ...] = (1.0, 3.0, 10.0)
     sensitivity_fn_fixed: Tuple[float, ...] = (0.0, 15.0, 50.0)
+    sensitivity_otp_catch: Tuple[float, ...] = (0.5, 0.7, 0.9)      # share of fraud an OTP check stops
+    sensitivity_otp_cost: Tuple[float, ...] = (0.25, 1.0, 2.0)      # cost of one OTP check, incl. some customer friction
+    max_medium_share: float = 0.01          # OTP capacity: at most this share of all transactions may land in the medium tier
     per_transactions: int = 1_000_000       # savings are also quoted per this many transactions
     report_name: str = "threshold_report"
     policy_name: str = "decision_policy.json"
@@ -282,10 +285,44 @@ class ThresholdConfig:
         """Fail loudly on impossible settings."""
         if self.bootstrap_resamples < 10 or self.savings_resamples < 10 or self.tier_candidates < 5:
             raise ValueError("need at least 10 resamples and 5 tier candidates")
+        if not 0 < self.max_medium_share <= 1:
+            raise ValueError("max_medium_share must be in (0, 1]")
         if not 0 < self.min_flag_share < self.max_flag_share <= 1:
             raise ValueError("need 0 < min_flag_share < max_flag_share <= 1")
-        if not self.sensitivity_fp_costs or not self.sensitivity_fn_fixed or min(*self.sensitivity_fp_costs, *self.sensitivity_fn_fixed) < 0:
+        grids = (self.sensitivity_fp_costs, self.sensitivity_fn_fixed, self.sensitivity_otp_catch, self.sensitivity_otp_cost)
+        if not all(grids) or min(min(g) for g in grids) < 0:
             raise ValueError("sensitivity grids must be non-empty and non-negative")
+        if max(self.sensitivity_otp_catch) > 1:
+            raise ValueError("OTP catch rates must be at most 1")
+
+
+@dataclass(frozen=True)
+class ServiceConfig:
+    """Step 9 settings: the scoring service, explanations and drift monitoring."""
+
+    latency_budget_ms: float = 100.0        # the brief's limit for one scoring request
+    max_batch: int = 1000                   # transactions per /score/batch call
+    reasons: int = 3                        # top features reported per explained transaction
+    shap_rows: int = 2000                   # rows used for the global importance (all test frauds + a genuine sample)
+    benchmark_requests: int = 300
+    benchmark_warmup: int = 20
+    psi_bins: int = 10
+    psi_warn: float = 0.10                  # population stability index: below 0.10 stable, 0.10-0.25 watch, above 0.25 act
+    psi_alert: float = 0.25
+    alert_feature_share: float = 0.25       # overall "alert" when this share of features alert, or the score distribution does
+    min_window: int = 500                   # transactions needed before drift is reported
+    monitor_buffer: int = 5000              # most recent transactions the API keeps for drift checks
+    reference_name: str = "drift_reference.json"
+    drift_ignore: Tuple[str, ...] = ("Time_scaled",)   # a clock only moves forward, so any later window is "drifted" by construction
+
+    def __post_init__(self) -> None:
+        """Fail loudly on impossible settings."""
+        if self.latency_budget_ms <= 0 or self.max_batch < 1 or self.reasons < 1 or self.benchmark_requests < 10:
+            raise ValueError("latency budget, batch size, reasons and benchmark requests must be positive (at least 10 requests)")
+        if self.psi_bins < 2 or not 0 < self.psi_warn < self.psi_alert or not 0 < self.alert_feature_share <= 1:
+            raise ValueError("need psi_bins >= 2, 0 < psi_warn < psi_alert and 0 < alert_feature_share <= 1")
+        if self.min_window < 10 or self.monitor_buffer < self.min_window:
+            raise ValueError("min_window must be at least 10 and not above monitor_buffer")
 
 
 @dataclass(frozen=True)
@@ -302,3 +339,4 @@ class ProjectConfig:
     supervised: SupervisedConfig = field(default_factory=SupervisedConfig)
     anomaly: AnomalyConfig = field(default_factory=AnomalyConfig)
     thresholds: ThresholdConfig = field(default_factory=ThresholdConfig)
+    service: ServiceConfig = field(default_factory=ServiceConfig)

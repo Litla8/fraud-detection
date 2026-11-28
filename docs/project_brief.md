@@ -37,4 +37,4 @@ approving everything. Change the numbers in `fraud/config.py` (`CostConfig`) and
   Velocity-style features are documented as future work for a dataset such as IEEE-CIS.
 
 ## Deliverables
-Imbalance strategy comparison report, trained hybrid model (XGBoost + autoencoder), FastAPI scoring service with Docker, cost-benefit analysis.
+Imbalance strategy comparison report, trained model (the Step 6 hybrid with an autoencoder was built and tested but added no validation PR-AUC, so the supervised model is deployed), FastAPI scoring service with Docker, cost-benefit analysis (`reports/cost_benefit.md`).

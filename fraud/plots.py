@@ -281,3 +281,47 @@ def plot_threshold_stability(thresholds: Sequence[float], chosen: float) -> Figu
     _style(ax)
     fig.tight_layout()
     return fig
+
+
+def plot_shap_importance(table: pd.DataFrame, method: str, top: int = 15) -> Figure:
+    """Mean absolute SHAP contribution per feature, over all rows and over frauds only (when the table has ``mean_abs_fraud``)."""
+    items = table.head(top).iloc[::-1]
+    fig, ax = plt.subplots(figsize=(7, 5))
+    height = 0.4
+    positions = np.arange(len(items))
+    ax.barh(positions + (height / 2 if "mean_abs_fraud" in items else 0), items["mean_abs_all"], height=height, color=GENUINE, label="all rows")
+    if "mean_abs_fraud" in items:
+        ax.barh(positions - height / 2, items["mean_abs_fraud"], height=height, color=FRAUD, label="fraud rows")
+        ax.legend(frameon=False)
+    ax.set_yticks(positions, items["feature"])
+    ax.set_xlabel("mean |contribution to the score|"); ax.set_title(f"What drives the model ({method})")
+    _style(ax)
+    fig.tight_layout()
+    return fig
+
+
+def plot_example_explanations(examples: dict) -> Figure:
+    """One panel per example transaction: signed contributions of its top features (red raises fraud risk, blue lowers it)."""
+    count = max(len(examples), 1)
+    fig, axes = plt.subplots(1, count, figsize=(4.6 * count, 3.4), squeeze=False)
+    for ax, (kind, info) in zip(axes[0], examples.items()):
+        reasons = info["reasons"][::-1]
+        ax.barh([r["feature"] for r in reasons], [r["contribution"] for r in reasons], color=[FRAUD if r["contribution"] > 0 else GENUINE for r in reasons])
+        ax.axvline(0, color="black", lw=0.8)
+        ax.set_title(f"{kind.replace('_', ' ')} (score {info['score']:.3f})", fontsize=10)
+        _style(ax)
+    fig.tight_layout()
+    return fig
+
+
+def plot_psi(table: pd.DataFrame, warn: float, alert: float, top: int = 15) -> Figure:
+    """PSI of the most drifted features (and the model score) for one window, with the warn and alert lines."""
+    items = table.sort_values("psi", ascending=False).head(top).iloc[::-1]
+    colours = [FRAUD if p >= alert else "#e0a030" if p >= warn else GENUINE for p in items["psi"]]
+    fig, ax = plt.subplots(figsize=(7, 5))
+    ax.barh(items["feature"], items["psi"], color=colours)
+    ax.axvline(warn, color="grey", ls="--", lw=1); ax.axvline(alert, color="black", ls="--", lw=1)
+    ax.set_xlabel("population stability index (dashed: warn, alert)"); ax.set_title("Which inputs have drifted since training?")
+    _style(ax)
+    fig.tight_layout()
+    return fig

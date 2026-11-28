@@ -64,6 +64,20 @@ def test_optimise_tiers_is_exact_against_brute_force() -> None:
     assert got["cost"] <= same_cut + 1e-9
 
 
+def test_otp_capacity_cap_is_respected_and_costs_something() -> None:
+    y, s, a = _scores()
+    cheap = replace(CFG, otp_cost=0.0, otp_fraud_catch_rate=1.0)
+    cand = policy.candidate_thresholds(s, 60, 0.001, 0.5)
+    free = policy.optimise_tiers(y, s, a, cheap, cand)
+    capped = policy.optimise_tiers(y, s, a, cheap, cand, max_medium_share=0.01)
+    share = policy.tier_table(y, s, capped["t_medium"], capped["t_high"]).set_index("tier").loc["medium", "rows"] / len(y)
+    assert share <= 0.01 and capped["cost"] >= free["cost"] - 1e-9
+    none = policy.optimise_tiers(y, s, a, cheap, cand, max_medium_share=1e-9)
+    assert none["t_medium"] == none["t_high"]                              # no room for OTP: block-only
+    with pytest.raises(ValueError):
+        policy.optimise_tiers(y, s, a, cheap, cand, max_medium_share=0.0)
+
+
 def test_free_otp_makes_a_wide_medium_tier() -> None:
     y, s, a = _scores()
     cheap = replace(CFG, otp_cost=0.0, otp_fraud_catch_rate=1.0)
@@ -134,8 +148,19 @@ def test_sensitivity_has_one_row_per_scenario() -> None:
     assert cheap_fp <= dear_fp                                                # costlier false alarms push the threshold up
 
 
+def test_otp_sensitivity_weak_otp_loses_the_tier_advantage() -> None:
+    y, s, a = _scores()
+    tcfg = ThresholdConfig(tier_candidates=40, sensitivity_otp_catch=(0.0, 0.9), sensitivity_otp_cost=(0.25, 500.0))
+    table = policy.otp_sensitivity(y, s, a, y, s, a, CFG, tcfg)
+    assert len(table) == 4
+    useless = table[(table["otp_catch_rate"] == 0.0) & (table["otp_cost"] == 500.0)].iloc[0]
+    assert useless["otp_checks"] == 0 and useless["tiers_saved_share"] <= useless["block_saved_share"] + 1e-9
+    good = table[(table["otp_catch_rate"] == 0.9) & (table["otp_cost"] == 0.25)].iloc[0]
+    assert good["tiers_saved_share"] >= useless["tiers_saved_share"]
+
+
 def test_threshold_config_validation() -> None:
-    for bad in (dict(bootstrap_resamples=5), dict(tier_candidates=2), dict(min_flag_share=0.6), dict(sensitivity_fp_costs=()), dict(sensitivity_fn_fixed=(-1.0,))):
+    for bad in (dict(bootstrap_resamples=5), dict(tier_candidates=2), dict(min_flag_share=0.6), dict(sensitivity_fp_costs=()), dict(sensitivity_fn_fixed=(-1.0,)), dict(sensitivity_otp_catch=(1.5,)), dict(max_medium_share=0.0), dict(max_medium_share=1.5), dict(sensitivity_otp_cost=())):
         with pytest.raises(ValueError):
             ThresholdConfig(**bad)
 
@@ -156,7 +181,7 @@ def test_run_end_to_end(tmp_path: Path) -> None:
     train_supervised.run(cfg, method="time")
     summary = optimize_threshold.run(cfg, method="time")
     names = [r["strategy"] for r in summary["strategies"]]
-    assert names[0] == "approve everything" and "three tiers (OTP + block)" in names and len(summary["sensitivity"]) == 9
+    assert names[0] == "approve everything" and "three tiers (OTP + block)" in names and len(summary["sensitivity"]) == 9 and len(summary["otp_sensitivity"]) == 9
     assert summary["recommended"]["saved_share"] <= 1.0 and summary["saved_share_interval"]["low"] <= summary["saved_share_interval"]["high"]
     reports = tmp_path / "reports"
     assert (reports / "cost_benefit.csv").is_file() and (reports / "sensitivity.csv").is_file() and (reports / "threshold_report.json").is_file()

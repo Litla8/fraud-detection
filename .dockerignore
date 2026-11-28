@@ -1,0 +1,13 @@
+.venv
+.git
+data
+reports
+tests
+notebooks
+docs
+**/__pycache__
+.pytest_cache
+# only what the service needs goes into the image
+models/anomaly_detectors.joblib
+models/scaler_stratified.joblib
+models/hybrid.json
