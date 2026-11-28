@@ -10,7 +10,7 @@ business cost matrix, and serve the model as a low-latency API. Dataset: Kaggle 
 - [x] Step 3: Preprocessing (duplicates, RobustScaler, time-based and stratified splits)
 - [x] Step 4: Handling imbalance (class weights, under-sampling, SMOTE, ADASYN, focal-style weighting)
 - [x] Step 5: Supervised models (Logistic Regression, Random Forest, XGBoost, LightGBM)
-- [ ] Step 6: Anomaly detection (Isolation Forest, One-Class SVM, autoencoder) and the hybrid
+- [x] Step 6: Anomaly detection (Isolation Forest, One-Class SVM, autoencoder) and the hybrid
 - [ ] Step 7: Feature engineering (not possible on this file: no customer column)
 - [ ] Step 8: Threshold optimisation and risk tiers
 - [ ] Step 9: SHAP, FastAPI, Docker, drift monitoring
@@ -117,10 +117,29 @@ cross-validation winner, which was statistically tied with doing nothing). Hyper
 * Outputs: `models/supervised_best.joblib` plus `supervised_best.json` (features and thresholds), and charts in `reports/figures/`
   (`model_comparison.png`, `model_pr_curves.png`, `feature_importance.png`). If XGBoost or LightGBM is not installed, that model is skipped with a warning.
 
+## Step 6: anomaly detection and the hybrid
+
+```powershell
+python -m fraud.train_anomaly --sample     # quick check, about 15 seconds
+python -m fraud.train_anomaly              # full run, about 1 minute (needs the Step 5 model: run Step 5 without --sample first)
+```
+
+Three detectors learn what a **genuine** transaction looks like (fraud rows are never shown to them) and score how unusual a row is:
+Isolation Forest, One-Class SVM (on a random 8,000 genuine rows, because it is quadratic) and an autoencoder (a small
+`MLPRegressor` that rebuilds its input through a narrow layer; the score is the reconstruction error). Features are clipped to +-10 first.
+
+* **Percentile scores.** Each detector's raw score is turned into a percentile against held-out *validation* genuine rows
+  ("more unusual than 99% of genuine transactions"), so it means the same thing for one transaction or a million.
+* **Hybrid = (1 - w) x supervised probability + w x anomaly percentile.** The detector and weight w are picked on validation PR-AUC only,
+  and the hybrid replaces the supervised model only if it adds at least 0.01 (`min_gain`); otherwise the report says "hybrid = supervised (no gain)".
+* **Rescue analysis.** For the frauds the supervised model misses, how many does each detector alert (above the 99th percentile), and at what cost in extra false alarms?
+* Outputs: `reports/anomaly_comparison.csv/json`, `blend_grid.csv`, charts `anomaly_separation.png`, `blend_weights.png`, `hybrid_pr_curves.png`,
+  and `models/anomaly_detectors.joblib` plus `models/hybrid.json` (the choice, weights and thresholds Step 8 and 9 will use).
+
 ## Structure
 
 ```
-fraud/     config.py, data.py, metrics.py, costs.py, define.py (Step 1), splits.py, eda.py, plots.py, explore.py (Step 2), preprocess.py (Step 3), imbalance.py + run_imbalance.py (Step 4), models.py + train_supervised.py (Step 5), logging_utils.py
+fraud/     config.py, data.py, metrics.py, costs.py, define.py (Step 1), splits.py, eda.py, plots.py, explore.py (Step 2), preprocess.py (Step 3), imbalance.py + run_imbalance.py (Step 4), models.py + train_supervised.py (Step 5), anomaly.py + train_anomaly.py (Step 6), logging_utils.py
 tests/     pytest suite (synthetic data, no Kaggle file needed)
 docs/      project_brief.md
 data/, models/, reports/   generated files (git-ignored)

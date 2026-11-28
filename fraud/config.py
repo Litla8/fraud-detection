@@ -217,6 +217,49 @@ class SupervisedConfig:
 
 
 @dataclass(frozen=True)
+class AnomalyConfig:
+    """Step 6 settings: three detectors trained on genuine transactions only, and the blend with the supervised model.
+
+    Every detector scores "how unusual is this row compared with normal ones" (higher = more unusual). Features are clipped to
+    +-``clip`` first so a handful of huge ``Amount`` values cannot dominate distance-based models. The autoencoder is a
+    scikit-learn ``MLPRegressor`` trained to reproduce its own input through a narrow middle layer; the score is the squared
+    reconstruction error.
+    """
+
+    models: Tuple[str, ...] = ("isolation_forest", "one_class_svm", "autoencoder")
+    clip: float = 10.0
+    iforest_trees: int = 200
+    iforest_max_samples: int = 256
+    ocsvm_nu: float = 0.01
+    ocsvm_rows: int = 8_000                 # the SVM is quadratic in the rows, so it sees a random subset of genuine rows
+    ocsvm_gamma: str = "scale"
+    ae_hidden: Tuple[int, ...] = (16, 8, 16)
+    ae_epochs: int = 30
+    ae_batch_size: int = 512
+    ae_learning_rate: float = 0.001
+    ae_rows: int = 100_000
+    blend_weights: Tuple[float, ...] = (0.0, 0.05, 0.1, 0.2, 0.3, 0.5)   # weight of the anomaly percentile in the hybrid score
+    min_gain: float = 0.01                  # validation PR-AUC the blend must add (about a quarter of its bootstrap noise) before it replaces the supervised model
+    rescue_quantile: float = 0.99           # "alerted by the detector" = more unusual than 99% of validation genuine rows
+    sample_normal: int = 20_000             # quick check: genuine training rows used
+    report_name: str = "anomaly_comparison"
+
+    def __post_init__(self) -> None:
+        """Fail loudly on impossible settings."""
+        known = {"isolation_forest", "one_class_svm", "autoencoder"}
+        if not self.models or not set(self.models) <= known:
+            raise ValueError(f"models must be a non-empty subset of {sorted(known)}")
+        if self.clip <= 0:
+            raise ValueError("clip must be positive")
+        if not self.blend_weights or 0.0 not in self.blend_weights or any(not 0 <= w < 1 for w in self.blend_weights):
+            raise ValueError("blend_weights must include 0.0 and lie in [0, 1)")
+        if not 0 < self.rescue_quantile < 1:
+            raise ValueError("rescue_quantile must be in (0, 1)")
+        if not 0 < self.ocsvm_nu < 1 or min(self.ocsvm_rows, self.ae_rows, self.sample_normal, self.ae_epochs) < 1 or not self.ae_hidden:
+            raise ValueError("ocsvm_nu must be in (0, 1) and row / epoch counts and ae_hidden must be positive")
+
+
+@dataclass(frozen=True)
 class ProjectConfig:
     """Everything a pipeline step needs."""
 
@@ -228,3 +271,4 @@ class ProjectConfig:
     prep: PreprocessConfig = field(default_factory=PreprocessConfig)
     imbalance: ImbalanceConfig = field(default_factory=ImbalanceConfig)
     supervised: SupervisedConfig = field(default_factory=SupervisedConfig)
+    anomaly: AnomalyConfig = field(default_factory=AnomalyConfig)

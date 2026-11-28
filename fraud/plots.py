@@ -160,8 +160,8 @@ def plot_strategy_cv(table: pd.DataFrame, winner: str) -> Figure:
     return fig
 
 
-def plot_pr_curves(curves: dict, base_rate: float) -> Figure:
-    """Precision-recall curves on validation data, one line per strategy (``curves`` maps name -> (precision, recall))."""
+def plot_pr_curves(curves: dict, base_rate: float, title: str = "Precision-recall on validation data") -> Figure:
+    """Precision-recall curves, one line per strategy (``curves`` maps name -> (precision, recall))."""
     fig, ax = plt.subplots(figsize=(7, 5))
     for name, (precision, recall) in curves.items():
         ax.plot(recall, precision, label=name, lw=1.6)
@@ -169,7 +169,7 @@ def plot_pr_curves(curves: dict, base_rate: float) -> Figure:
     ax.axhline(0.85, color="grey", ls="--", lw=1)
     ax.text(0.01, 0.86, "precision 0.85", fontsize=8, color="grey")
     ax.set_xlabel("recall"); ax.set_ylabel("precision"); ax.set_ylim(0, 1.02)
-    ax.set_title("Precision-recall on validation data")
+    ax.set_title(title)
     ax.legend(frameon=False, fontsize=8)
     _style(ax)
     fig.tight_layout()
@@ -198,6 +198,37 @@ def plot_importance(importance: dict, top: int = 15, title: str = "Feature impor
     fig, ax = plt.subplots(figsize=(6.5, 4.8))
     ax.barh([k for k, _ in items], [v for _, v in items], color=GENUINE)
     ax.set_xlabel("share of total importance"); ax.set_title(title)
+    _style(ax)
+    fig.tight_layout()
+    return fig
+
+
+def plot_anomaly_separation(percentiles: dict) -> Figure:
+    """How well each detector separates fraud: histogram of the percentile score for genuine and fraud rows.
+
+    ``percentiles`` maps detector name -> (genuine_percentiles, fraud_percentiles). A perfect detector piles fraud at 1.0.
+    """
+    count = max(len(percentiles), 1)
+    fig, axes = plt.subplots(1, count, figsize=(4.2 * count, 3.6), squeeze=False)
+    bins = np.linspace(0, 1, 21)
+    for ax, (name, (genuine, fraud)) in zip(axes[0], percentiles.items()):
+        ax.hist(genuine, bins=bins, density=True, color=GENUINE, alpha=0.6, label="genuine")
+        ax.hist(fraud, bins=bins, density=True, color=FRAUD, alpha=0.6, label="fraud")
+        ax.set_title(name.replace("_", " ")); ax.set_xlabel("anomaly percentile (1 = most unusual)")
+        _style(ax)
+    axes[0][0].set_ylabel("density"); axes[0][0].legend(frameon=False, fontsize=8)
+    fig.tight_layout()
+    return fig
+
+
+def plot_blend_weights(grid: pd.DataFrame) -> Figure:
+    """Validation PR-AUC against the anomaly weight in the hybrid, one line per detector (columns detector, weight, val_pr_auc)."""
+    fig, ax = plt.subplots(figsize=(6.5, 4))
+    for name, part in grid.groupby("detector"):
+        ax.plot(part["weight"], part["val_pr_auc"], marker="o", label=name.replace("_", " "))
+    ax.set_xlabel("weight of the anomaly score (0 = supervised model only)"); ax.set_ylabel("validation PR-AUC")
+    ax.set_title("Does adding an anomaly score help?")
+    ax.legend(frameon=False, fontsize=8)
     _style(ax)
     fig.tight_layout()
     return fig
