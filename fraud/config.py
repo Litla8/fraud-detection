@@ -260,6 +260,35 @@ class AnomalyConfig:
 
 
 @dataclass(frozen=True)
+class ThresholdConfig:
+    """Step 8 settings: how the decision thresholds and risk tiers are chosen and checked.
+
+    Thresholds are always chosen on validation scores and judged on the test set. ``bootstrap_resamples`` resamples the validation set
+    to see how much the cost-optimal threshold moves (only 49 frauds, so it moves a lot) and the test set for savings intervals.
+    """
+
+    bootstrap_resamples: int = 200
+    savings_resamples: int = 500
+    tier_candidates: int = 150              # candidate cut points for the two tier thresholds (searched exhaustively in pairs)
+    min_flag_share: float = 0.0001          # candidate cut points sit between the top 0.01% ...
+    max_flag_share: float = 0.5             # ... and the top 50% of validation scores
+    sensitivity_fp_costs: Tuple[float, ...] = (1.0, 3.0, 10.0)
+    sensitivity_fn_fixed: Tuple[float, ...] = (0.0, 15.0, 50.0)
+    per_transactions: int = 1_000_000       # savings are also quoted per this many transactions
+    report_name: str = "threshold_report"
+    policy_name: str = "decision_policy.json"
+
+    def __post_init__(self) -> None:
+        """Fail loudly on impossible settings."""
+        if self.bootstrap_resamples < 10 or self.savings_resamples < 10 or self.tier_candidates < 5:
+            raise ValueError("need at least 10 resamples and 5 tier candidates")
+        if not 0 < self.min_flag_share < self.max_flag_share <= 1:
+            raise ValueError("need 0 < min_flag_share < max_flag_share <= 1")
+        if not self.sensitivity_fp_costs or not self.sensitivity_fn_fixed or min(*self.sensitivity_fp_costs, *self.sensitivity_fn_fixed) < 0:
+            raise ValueError("sensitivity grids must be non-empty and non-negative")
+
+
+@dataclass(frozen=True)
 class ProjectConfig:
     """Everything a pipeline step needs."""
 
@@ -272,3 +301,4 @@ class ProjectConfig:
     imbalance: ImbalanceConfig = field(default_factory=ImbalanceConfig)
     supervised: SupervisedConfig = field(default_factory=SupervisedConfig)
     anomaly: AnomalyConfig = field(default_factory=AnomalyConfig)
+    thresholds: ThresholdConfig = field(default_factory=ThresholdConfig)

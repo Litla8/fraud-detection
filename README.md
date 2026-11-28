@@ -12,7 +12,7 @@ business cost matrix, and serve the model as a low-latency API. Dataset: Kaggle 
 - [x] Step 5: Supervised models (Logistic Regression, Random Forest, XGBoost, LightGBM)
 - [x] Step 6: Anomaly detection (Isolation Forest, One-Class SVM, autoencoder) and the hybrid
 - [ ] Step 7: Feature engineering (not possible on this file: no customer column)
-- [ ] Step 8: Threshold optimisation and risk tiers
+- [x] Step 8: Threshold optimisation and risk tiers
 - [ ] Step 9: SHAP, FastAPI, Docker, drift monitoring
 
 ## Targets
@@ -136,10 +136,33 @@ Isolation Forest, One-Class SVM (on a random 8,000 genuine rows, because it is q
 * Outputs: `reports/anomaly_comparison.csv/json`, `blend_grid.csv`, charts `anomaly_separation.png`, `blend_weights.png`, `hybrid_pr_curves.png`,
   and `models/anomaly_detectors.joblib` plus `models/hybrid.json` (the choice, weights and thresholds Step 8 and 9 will use).
 
+## Step 8: thresholds, risk tiers and cost-benefit
+
+```powershell
+python -m fraud.optimize_threshold      # about 10-20 seconds; needs the Step 5 model
+```
+
+Uses the Step 5 supervised model (the hybrid of Step 6 was not adopted: it added no validation PR-AUC). **Every threshold is chosen on
+validation scores and applied unchanged to the test set.**
+
+* **Block-or-approve thresholds** compared on the test set: F2-optimal, precision-0.85, cost-optimal (one point and the median of 200
+  bootstrap resamples of validation, because 49 validation frauds make the optimum jump around), and a clearly labelled *best case* that
+  picks the threshold on the test set itself (not achievable in practice).
+* **Three risk tiers** (`fraud/policy.py`): score below `t_medium` is approved (low), from `t_medium` to `t_high` gets an OTP check (medium),
+  from `t_high` is blocked and reviewed (high). The best pair is found exactly by trying every pair of candidate cut points.
+  An OTP stops 90% of fraud (assumption) and costs EUR 0.25 for every medium row.
+* **Cost-benefit** (`reports/cost_benefit.csv`, `cost_benefit.md`): cost and saving against "approve everything" for every strategy, a 95%
+  bootstrap interval for the tiered saving, the saving per 1,000,000 transactions, and `sensitivity.csv`, which re-chooses the thresholds under
+  false-alarm costs of EUR 1 / 3 / 10 and fixed missed-fraud fees of EUR 0 / 15 / 50 and scores them on the test set.
+* Outputs: `reports/threshold_report.json`, charts `cost_curves.png`, `risk_tiers.png`, `threshold_stability.png`, and
+  **`models/decision_policy.json`** (the thresholds, tier actions and cost assumptions that the Step 9 API will load).
+* The cost-optimal block threshold flags generously (break-even precision is about 2%), so it differs from the brief's precision-0.85 target;
+  both are reported.
+
 ## Structure
 
 ```
-fraud/     config.py, data.py, metrics.py, costs.py, define.py (Step 1), splits.py, eda.py, plots.py, explore.py (Step 2), preprocess.py (Step 3), imbalance.py + run_imbalance.py (Step 4), models.py + train_supervised.py (Step 5), anomaly.py + train_anomaly.py (Step 6), logging_utils.py
+fraud/     config.py, data.py, metrics.py, costs.py, define.py (Step 1), splits.py, eda.py, plots.py, explore.py (Step 2), preprocess.py (Step 3), imbalance.py + run_imbalance.py (Step 4), models.py + train_supervised.py (Step 5), anomaly.py + train_anomaly.py (Step 6), policy.py + optimize_threshold.py (Step 8), logging_utils.py
 tests/     pytest suite (synthetic data, no Kaggle file needed)
 docs/      project_brief.md
 data/, models/, reports/   generated files (git-ignored)

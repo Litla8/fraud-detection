@@ -232,3 +232,52 @@ def plot_blend_weights(grid: pd.DataFrame) -> Figure:
     _style(ax)
     fig.tight_layout()
     return fig
+
+
+def plot_cost_curves(curves: dict, chosen: dict, n_rows: dict) -> Figure:
+    """Total cost against the share of transactions flagged, per dataset (``curves`` maps name -> cost_curve table).
+
+    ``chosen`` maps name -> threshold row (flagged count and cost) to mark; ``n_rows`` maps name -> number of transactions.
+    """
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    colours = {"validation": GENUINE, "test": FRAUD}
+    for name, table in curves.items():
+        share = table["flagged"].to_numpy() / n_rows[name]
+        keep = share > 0
+        ax.plot(share[keep], table["cost"].to_numpy()[keep], label=name, color=colours.get(name), lw=1.6)
+        if name in chosen:
+            ax.scatter([chosen[name]["flagged"] / n_rows[name]], [chosen[name]["cost"]], color=colours.get(name), zorder=3, s=40)
+    ax.set_xscale("log"); ax.set_xlabel("share of transactions flagged (log scale)"); ax.set_ylabel("total cost (EUR)")
+    ax.set_title("Cost of every possible threshold (dot = chosen)")
+    ax.legend(frameon=False)
+    _style(ax)
+    fig.tight_layout()
+    return fig
+
+
+def plot_tiers(tiers: pd.DataFrame) -> Figure:
+    """Transactions and frauds per risk tier (columns tier, rows, frauds), counts on a log axis."""
+    fig, axes = plt.subplots(1, 2, figsize=(8, 3.6))
+    palette = {"low": GENUINE, "medium": "#e0a030", "high": FRAUD}
+    for ax, column, title in zip(axes, ("rows", "frauds"), ("transactions per tier", "frauds per tier")):
+        ax.bar(tiers["tier"], tiers[column].clip(lower=0.5), color=[palette.get(t, "grey") for t in tiers["tier"]])
+        for i, value in enumerate(tiers[column]):
+            ax.text(i, max(value, 0.5), f"{int(value):,}", ha="center", va="bottom", fontsize=9)
+        ax.set_yscale("log"); ax.set_title(title)
+        _style(ax)
+    fig.tight_layout()
+    return fig
+
+
+def plot_threshold_stability(thresholds: Sequence[float], chosen: float) -> Figure:
+    """How the cost-optimal threshold moves when the validation set is resampled (log axis), with the chosen (median) value."""
+    values = np.asarray([t for t in thresholds if np.isfinite(t) and t > 0])
+    fig, ax = plt.subplots(figsize=(6.5, 3.6))
+    ax.hist(np.log10(values), bins=25, color=GENUINE)
+    ax.axvline(np.log10(chosen), color=FRAUD, lw=2, label=f"chosen = median ({chosen:.4f})")
+    ax.set_xlabel("cost-optimal threshold (log10)"); ax.set_ylabel("bootstrap resamples")
+    ax.set_title("How stable is the cost-optimal threshold?")
+    ax.legend(frameon=False)
+    _style(ax)
+    fig.tight_layout()
+    return fig
